@@ -1,3 +1,4 @@
+pub mod command_req;
 mod error;
 
 pub use error::Error;
