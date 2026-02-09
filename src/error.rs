@@ -10,7 +10,6 @@ impl Error {
     pub fn new<T: Into<String>>(reason: T) -> Self {
         Self {
             reason: reason.into(),
-            location: Location::caller(),
             backtrace: Backtrace::capture(),
         }
     }
