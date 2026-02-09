@@ -1,0 +1,9 @@
+[package]
+name = "jlou"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mio = { version = "1.1.1", default-features = false, features = ["os-poll", "os-ext"] }
+noargs = "0.4.2"
+nojson = "0.3.8"
