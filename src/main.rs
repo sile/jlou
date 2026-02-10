@@ -9,7 +9,8 @@ fn main() -> noargs::Result<()> {
     }
     noargs::HELP_FLAG.take_help(&mut args);
 
-    let _ = jlou::command_req::try_run(&mut args)?;
+    let _ =
+        jlou::command_req::try_run(&mut args)? || jlou::command_echo_server::try_run(&mut args)?;
 
     if let Some(help) = args.finish()? {
         print!("{help}");
