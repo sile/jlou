@@ -3,7 +3,7 @@ use std::net::UdpSocket;
 use std::time::Duration;
 
 const MAX_UDP_PACKET: usize = 65507;
-const DEFAULT_SEND_BUF_SIZE_STR: &str = "1200";
+const DEFAULT_BUF_SIZE_STR: &str = "1200";
 const DEFAULT_TIMEOUT_MS_STR: &str = "5000";
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
@@ -25,10 +25,10 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         .doc("Pretty-print JSON responses")
         .take(args)
         .is_present();
-    let send_buf_size: usize = noargs::opt("send-buf-size")
+    let buf_size: usize = noargs::opt("buf-size")
         .ty("BYTES")
         .doc("Maximum UDP payload size per packet (bytes)")
-        .default(DEFAULT_SEND_BUF_SIZE_STR)
+        .default(DEFAULT_BUF_SIZE_STR)
         .take(args)
         .then(|o| o.value().parse())?;
     let timeout_ms: u64 = noargs::opt("timeout")
@@ -45,7 +45,7 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     let call_command = CallCommand {
         server_addr,
         pretty,
-        send_buf_size,
+        buf_size,
         timeout: Duration::from_millis(timeout_ms),
     };
     call_command.run()?;
@@ -56,18 +56,18 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
 struct CallCommand {
     server_addr: String,
     pretty: bool,
-    send_buf_size: usize,
+    buf_size: usize,
     timeout: Duration,
 }
 
 impl CallCommand {
     fn run(self) -> crate::Result<()> {
-        if self.send_buf_size == 0 {
-            return Err(crate::Error::new("send-buf-size must be greater than 0"));
+        if self.buf_size == 0 {
+            return Err(crate::Error::new("buf-size must be greater than 0"));
         }
-        if self.send_buf_size > MAX_UDP_PACKET {
+        if self.buf_size > MAX_UDP_PACKET {
             return Err(crate::Error::new(format!(
-                "send-buf-size must be <= {MAX_UDP_PACKET}"
+                "buf-size must be <= {MAX_UDP_PACKET}"
             )));
         }
         if self.timeout == Duration::from_millis(0) {
@@ -82,7 +82,7 @@ impl CallCommand {
         let stdout = std::io::stdout();
         let mut output_writer = std::io::BufWriter::new(stdout.lock());
 
-        let mut send_buf: Vec<u8> = Vec::with_capacity(self.send_buf_size);
+        let mut send_buf: Vec<u8> = Vec::with_capacity(self.buf_size);
         let mut pending_responses = 0usize;
 
         for line in input_reader.lines() {
@@ -91,14 +91,14 @@ impl CallCommand {
             let request_text = request.json.text();
             let request_len = request_text.as_bytes().len();
 
-            if request_len > self.send_buf_size {
+            if request_len > self.buf_size {
                 return Err(crate::Error::new(
-                    "request size exceeds send-buf-size",
+                    "request size exceeds buf-size",
                 ));
             }
 
             let extra = if send_buf.is_empty() { 0 } else { 1 };
-            if send_buf.len() + extra + request_len > self.send_buf_size {
+            if send_buf.len() + extra + request_len > self.buf_size {
                 self.flush_send_buf(&socket, &mut send_buf)?;
             }
 
@@ -147,7 +147,7 @@ impl CallCommand {
         output_writer: &mut impl Write,
         expected: usize,
     ) -> crate::Result<()> {
-        let mut recv_buf = vec![0u8; MAX_UDP_PACKET];
+        let mut recv_buf = vec![0u8; self.buf_size];
         let mut received = 0usize;
         while received < expected {
             let bytes_read = match socket.recv(&mut recv_buf) {

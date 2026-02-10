@@ -1,4 +1,4 @@
-const MAX_UDP_PACKET: usize = 65507;
+const DEFAULT_BUF_SIZE_STR: &str = "65507";
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("echo-server")
@@ -19,12 +19,18 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         .example(":9000")
         .take(args)
         .then(|a| crate::utils::parse_socket_addr(a.value()))?;
+    let buf_size: std::num::NonZeroUsize = noargs::opt("buf-size")
+        .ty("BYTES")
+        .doc("Maximum UDP payload size per packet (bytes)")
+        .default(DEFAULT_BUF_SIZE_STR)
+        .take(args)
+        .then(|o| o.value().parse())?;
 
     if args.metadata().help_mode {
         return Ok(true);
     }
 
-    run_server_udp(bind_addr)?;
+    run_server_udp(bind_addr, buf_size.get())?;
     Ok(true)
 }
 
@@ -46,10 +52,10 @@ where
     let _ = socket.send_to(response.to_string().as_bytes(), addr); // Ignores the result for simplicity
 }
 
-fn run_server_udp(bind_addr: std::net::SocketAddr) -> crate::Result<()> {
+fn run_server_udp(bind_addr: std::net::SocketAddr, buf_size: usize) -> crate::Result<()> {
     let socket = std::net::UdpSocket::bind(bind_addr)?;
-    let mut recv_buf = [0u8; MAX_UDP_PACKET / 2];
-    let mut send_buf = [0u8; MAX_UDP_PACKET];
+    let mut recv_buf = vec![0u8; buf_size];
+    let mut send_buf = vec![0u8; buf_size];
     loop {
         let (size, peer_addr) = socket.recv_from(&mut recv_buf)?;
         if size == 0 {
@@ -82,14 +88,40 @@ fn run_server_udp(bind_addr: std::net::SocketAddr) -> crate::Result<()> {
                 f.member("result", &json)
             })
             .to_string();
-            let size = response.as_bytes().len();
-            send_buf[send_buf_offset..][..size].copy_from_slice(response.as_bytes());
+            let response_bytes = response.as_bytes();
+            let size = response_bytes.len();
+            if size > send_buf.len() {
+                reply_err(
+                    &socket,
+                    peer_addr,
+                    -32603,
+                    "response size exceeds maximum UDP packet size",
+                );
+                continue;
+            }
+
+            if send_buf_offset != 0 && send_buf_offset + 1 + size > send_buf.len() {
+                let sent = socket.send_to(&send_buf[..send_buf_offset], peer_addr)?;
+                if sent != send_buf_offset {
+                    return Err(crate::Error::new("failed to send complete response"));
+                }
+                send_buf_offset = 0;
+            }
+
+            if send_buf_offset != 0 {
+                send_buf[send_buf_offset] = b'\n';
+                send_buf_offset += 1;
+            }
+
+            send_buf[send_buf_offset..][..size].copy_from_slice(response_bytes);
             send_buf_offset += size;
         }
 
-        let size = socket.send_to(&send_buf[..send_buf_offset], peer_addr)?;
-        if size != send_buf_offset {
-            return Err(crate::Error::new("failed to send complete response"));
+        if send_buf_offset != 0 {
+            let size = socket.send_to(&send_buf[..send_buf_offset], peer_addr)?;
+            if size != send_buf_offset {
+                return Err(crate::Error::new("failed to send complete response"));
+            }
         }
     }
 }
