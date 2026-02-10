@@ -1,3 +1,4 @@
+pub mod command_call;
 pub mod command_echo_server;
 pub mod command_req;
 mod error;
