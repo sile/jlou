@@ -1,4 +1,5 @@
-const DEFAULT_BUF_SIZE_STR: &str = "65507";
+const MAX_UDP_PACKET: usize = 65507;
+const DEFAULT_SEND_BUF_SIZE_STR: &str = "65507";
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("echo-server")
@@ -19,10 +20,10 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         .example(":9000")
         .take(args)
         .then(|a| crate::utils::parse_socket_addr(a.value()))?;
-    let buf_size: std::num::NonZeroUsize = noargs::opt("buf-size")
+    let send_buf_size: std::num::NonZeroUsize = noargs::opt("send-buf-size")
         .ty("BYTES")
         .doc("Maximum UDP payload size per packet (bytes)")
-        .default(DEFAULT_BUF_SIZE_STR)
+        .default(DEFAULT_SEND_BUF_SIZE_STR)
         .take(args)
         .then(|o| o.value().parse())?;
 
@@ -30,7 +31,14 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         return Ok(true);
     }
 
-    run_server_udp(bind_addr, buf_size.get())?;
+    if send_buf_size.get() > MAX_UDP_PACKET {
+        return Err(noargs::Error::other(
+            args,
+            format!("send-buf-size must be <= {MAX_UDP_PACKET}"),
+        ));
+    }
+
+    run_server_udp(bind_addr, send_buf_size.get())?;
     Ok(true)
 }
 
@@ -52,10 +60,10 @@ where
     let _ = socket.send_to(response.to_string().as_bytes(), addr); // Ignores the result for simplicity
 }
 
-fn run_server_udp(bind_addr: std::net::SocketAddr, buf_size: usize) -> crate::Result<()> {
+fn run_server_udp(bind_addr: std::net::SocketAddr, send_buf_size: usize) -> crate::Result<()> {
     let socket = std::net::UdpSocket::bind(bind_addr)?;
-    let mut recv_buf = vec![0u8; buf_size];
-    let mut send_buf = vec![0u8; buf_size];
+    let mut recv_buf = vec![0u8; MAX_UDP_PACKET];
+    let mut send_buf = vec![0u8; send_buf_size];
     loop {
         let (size, peer_addr) = socket.recv_from(&mut recv_buf)?;
         if size == 0 {
