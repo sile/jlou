@@ -1,4 +1,4 @@
-const MAX_UDP_PACKET: usize = 65535;
+const MAX_UDP_PACKET: usize = 65507;
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("echo-server")
@@ -43,7 +43,7 @@ where
             }),
         )
     });
-    let _ = socket.send_to(response.to_string().as_bytes(), addr);
+    let _ = socket.send_to(response.to_string().as_bytes(), addr); // Ignores the result for simplicity
 }
 
 fn run_server_udp(bind_addr: std::net::SocketAddr) -> crate::Result<()> {
@@ -87,7 +87,10 @@ fn run_server_udp(bind_addr: std::net::SocketAddr) -> crate::Result<()> {
             send_buf_offset += size;
         }
 
-        let _ = socket.send_to(&send_buf[..send_buf_offset], peer_addr);
+        let size = socket.send_to(&send_buf[..send_buf_offset], peer_addr)?;
+        if size != send_buf_offset {
+            return Err(crate::Error::new("failed to send complete response"));
+        }
     }
 }
 
