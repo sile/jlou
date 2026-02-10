@@ -28,40 +28,66 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     Ok(true)
 }
 
+fn reply_err<M>(socket: &std::net::UdpSocket, addr: std::net::SocketAddr, code: i32, message: M)
+where
+    M: std::fmt::Display,
+{
+    let response = nojson::object(|f| {
+        f.member("jsonrpc", "2.0")?;
+        f.member("id", ())?; // null
+        f.member(
+            "error",
+            nojson::object(|f| {
+                f.member("code", code)?;
+                f.member("message", message.to_string())
+            }),
+        )
+    });
+    let _ = socket.send_to(response.to_string().as_bytes(), addr);
+}
+
 fn run_server_udp(bind_addr: std::net::SocketAddr) -> crate::Result<()> {
     let socket = std::net::UdpSocket::bind(bind_addr)?;
-    let mut buf = vec![0u8; MAX_UDP_PACKET];
+    let mut recv_buf = [0u8; MAX_UDP_PACKET / 2];
+    let mut send_buf = [0u8; MAX_UDP_PACKET];
     loop {
-        let (bytes_read, peer_addr) = socket.recv_from(&mut buf)?;
-        if bytes_read == 0 {
+        let (size, peer_addr) = socket.recv_from(&mut recv_buf)?;
+        if size == 0 {
             continue;
         }
 
-        let response = match String::from_utf8(buf[..bytes_read].to_vec()) {
-            Ok(text) => match nojson::RawJson::parse(&text) {
-                Ok(json) => {
-                    let json_value = json.value();
-                    match parse_request(json_value) {
-                        Ok(Some(request_id)) => {
-                            let response = nojson::object(|f| {
-                                f.member("jsonrpc", "2.0")?;
-                                f.member("id", request_id)?;
-                                f.member("result", json_value)
-                            });
-                            Some(response.to_string())
-                        }
-                        Ok(None) => None,
-                        Err(e) => Some(build_error_response(e.to_string())),
-                    }
-                }
-                Err(e) => Some(build_error_response(e.to_string())),
-            },
-            Err(e) => Some(build_error_response(e.to_string())),
+        let Ok(text) = std::str::from_utf8(&recv_buf[..size])
+            .inspect_err(|e| reply_err(&socket, peer_addr, -32700, e))
+        else {
+            continue;
         };
 
-        if let Some(response) = response {
-            let _ = socket.send_to(response.as_bytes(), peer_addr);
+        let mut send_buf_offset = 0;
+        for line in text.lines() {
+            let Ok(json) = nojson::RawJson::parse(line)
+                .inspect_err(|e| reply_err(&socket, peer_addr, -32700, e))
+            else {
+                continue;
+            };
+
+            let Ok(Some(id)) = parse_request(json.value())
+                .inspect_err(|e| reply_err(&socket, peer_addr, -32600, e))
+            else {
+                continue;
+            };
+
+            let response = nojson::object(|f| {
+                f.member("jsonrpc", "2.0")?;
+                f.member("id", id)?;
+                f.member("result", &json)
+            })
+            .to_string();
+            let size = response.as_bytes().len();
+            send_buf[send_buf_offset..][..size].copy_from_slice(response.as_bytes());
+            send_buf_offset += size;
         }
+
+        let _ = socket.send_to(&send_buf[..send_buf_offset], peer_addr);
     }
 }
 
@@ -120,23 +146,4 @@ fn parse_request<'text, 'raw>(
     }
 
     Ok(id)
-}
-
-fn build_error_response(message: String) -> String {
-    let response = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member(
-            "error",
-            nojson::object(|f| {
-                // NOTE: For simplicity, we return a fixed error code (-32600) without an id field.
-                // In a production implementation, this should handle errors more granularly:
-                // - Parse errors should return -32700 without an id
-                // - Invalid requests should return -32600 with the id if present
-                f.member("code", -32600)?; // invalid-request code
-                f.member("message", message.as_str())
-            }),
-        )?;
-        f.member("id", ()) // null ID
-    });
-    response.to_string()
 }
