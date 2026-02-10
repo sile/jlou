@@ -1,4 +1,4 @@
-use std::net::UdpSocket;
+const MAX_UDP_PACKET: usize = 65535;
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("echo-server")
@@ -14,9 +14,9 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         return Ok(false);
     }
 
-    let listen_addr = noargs::arg("<ADDR>")
-        .doc("Listen address (UDP)")
-        .example("127.0.0.1:8080")
+    let bind_addr = noargs::arg("<ADDR>")
+        .doc("UDP bind address (FORMAT: `[IP_ADDR]:PORT`)")
+        .example(":9000")
         .take(args)
         .then(|a| crate::utils::parse_socket_addr(a.value()))?;
 
@@ -24,14 +24,12 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         return Ok(true);
     }
 
-    run_server_udp(listen_addr)?;
+    run_server_udp(bind_addr)?;
     Ok(true)
 }
 
-fn run_server_udp(listen_addr: std::net::SocketAddr) -> crate::Result<()> {
-    const MAX_UDP_PACKET: usize = 65535;
-
-    let socket = UdpSocket::bind(listen_addr)?;
+fn run_server_udp(bind_addr: std::net::SocketAddr) -> crate::Result<()> {
+    let socket = std::net::UdpSocket::bind(bind_addr)?;
     let mut buf = vec![0u8; MAX_UDP_PACKET];
     loop {
         let (bytes_read, peer_addr) = socket.recv_from(&mut buf)?;
