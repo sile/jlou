@@ -22,18 +22,18 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         .then(|a| -> Result<_, String> { Ok(normalize_server_addr(a.value())) })?;
     let pretty: bool = noargs::flag("pretty")
         .short('p')
-        .doc("Pretty-print JSON responses")
+        .doc("Pretty-print JSON responses to stdout")
         .take(args)
         .is_present();
     let send_buf_size: usize = noargs::opt("send-buf-size")
         .ty("BYTES")
-        .doc("Maximum UDP payload size per packet (bytes)")
+        .doc("Max UDP payload per outgoing packet; requests are joined with '\\n' up to this size")
         .default(DEFAULT_SEND_BUF_SIZE_STR)
         .take(args)
         .then(|o| o.value().parse())?;
     let timeout_ms: u64 = noargs::opt("timeout")
         .ty("MILLISECONDS")
-        .doc("Timeout in milliseconds for waiting responses")
+        .doc("Read timeout for waiting responses (ms)")
         .default(DEFAULT_TIMEOUT_MS_STR)
         .take(args)
         .then(|o| o.value().parse())?;

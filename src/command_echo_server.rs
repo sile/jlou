@@ -22,7 +22,7 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         .then(|a| crate::utils::parse_socket_addr(a.value()))?;
     let send_buf_size: std::num::NonZeroUsize = noargs::opt("send-buf-size")
         .ty("BYTES")
-        .doc("Maximum UDP payload size per packet (bytes)")
+        .doc("Max UDP payload per response packet; responses are joined with '\\n' up to this size")
         .default(DEFAULT_SEND_BUF_SIZE_STR)
         .take(args)
         .then(|o| o.value().parse())?;
