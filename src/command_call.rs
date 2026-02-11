@@ -23,7 +23,7 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         .doc("Pretty-print JSON responses to stdout")
         .take(args)
         .is_present();
-    let send_buf_size: usize = noargs::opt("send-buf-size")
+    let send_buf_size: std::num::NonZeroUsize = noargs::opt("send-buf-size")
         .short('b')
         .ty("BYTES")
         .doc("Max UDP payload per outgoing packet; requests are joined with '\\n' up to this size")
@@ -41,157 +41,134 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         return Ok(true);
     }
 
-    let call_command = CallCommand {
-        server_addr,
-        pretty,
-        send_buf_size,
-        timeout,
-    };
-    call_command.run()?;
-
+    run(server_addr, pretty, send_buf_size.get(), timeout)?;
     Ok(true)
 }
 
-struct CallCommand {
+fn run(
     server_addr: SocketAddr,
     pretty: bool,
     send_buf_size: usize,
     timeout: Duration,
-}
+) -> crate::Result<()> {
+    let socket = connect_to_server_udp(server_addr)?;
+    socket.set_read_timeout(Some(timeout))?;
 
-impl CallCommand {
-    fn run(self) -> crate::Result<()> {
-        if self.send_buf_size == 0 {
-            return Err(crate::Error::new("send-buf-size must be greater than 0"));
+    let stdin = std::io::stdin();
+    let input_reader = std::io::BufReader::new(stdin.lock());
+    let stdout = std::io::stdout();
+    let mut output_writer = std::io::BufWriter::new(stdout.lock());
+
+    let mut send_buf: Vec<u8> = Vec::with_capacity(send_buf_size);
+    let mut pending_responses = 0usize;
+
+    for line in input_reader.lines() {
+        let line = line?;
+        let request = Request::parse(line)?;
+        let request_text = request.json.text();
+        let request_len = request_text.as_bytes().len();
+
+        if request_len > send_buf_size {
+            return Err(crate::Error::new("request size exceeds send-buf-size"));
         }
-        if self.send_buf_size > MAX_UDP_PACKET {
-            return Err(crate::Error::new(format!(
-                "send-buf-size must be <= {MAX_UDP_PACKET}"
-            )));
-        }
-        if self.timeout == Duration::from_millis(0) {
-            return Err(crate::Error::new("timeout must be greater than 0"));
-        }
 
-        let socket = self.connect_to_server_udp()?;
-        socket.set_read_timeout(Some(self.timeout))?;
-
-        let stdin = std::io::stdin();
-        let input_reader = std::io::BufReader::new(stdin.lock());
-        let stdout = std::io::stdout();
-        let mut output_writer = std::io::BufWriter::new(stdout.lock());
-
-        let mut send_buf: Vec<u8> = Vec::with_capacity(self.send_buf_size);
-        let mut pending_responses = 0usize;
-
-        for line in input_reader.lines() {
-            let line = line?;
-            let request = Request::parse(line)?;
-            let request_text = request.json.text();
-            let request_len = request_text.as_bytes().len();
-
-            if request_len > self.send_buf_size {
-                return Err(crate::Error::new("request size exceeds send-buf-size"));
-            }
-
-            let extra = if send_buf.is_empty() { 0 } else { 1 };
-            if send_buf.len() + extra + request_len > self.send_buf_size {
-                self.flush_send_buf(&socket, &mut send_buf)?;
-            }
-
-            if !send_buf.is_empty() {
-                send_buf.push(b'\n');
-            }
-            send_buf.extend_from_slice(request_text.as_bytes());
-
-            if request.id.is_some() {
-                pending_responses += 1;
-            }
+        let extra = if send_buf.is_empty() { 0 } else { 1 };
+        if send_buf.len() + extra + request_len > send_buf_size {
+            flush_send_buf(&socket, &mut send_buf)?;
         }
 
         if !send_buf.is_empty() {
-            self.flush_send_buf(&socket, &mut send_buf)?;
+            send_buf.push(b'\n');
         }
+        send_buf.extend_from_slice(request_text.as_bytes());
 
-        if pending_responses > 0 {
-            self.receive_responses(&socket, &mut output_writer, pending_responses)?;
+        if request.id.is_some() {
+            pending_responses += 1;
         }
-
-        output_writer.flush()?;
-        Ok(())
     }
 
-    fn connect_to_server_udp(&self) -> crate::Result<UdpSocket> {
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
-        socket.connect(self.server_addr)?;
-        Ok(socket)
+    if !send_buf.is_empty() {
+        flush_send_buf(&socket, &mut send_buf)?;
     }
 
-    fn flush_send_buf(&self, socket: &UdpSocket, send_buf: &mut Vec<u8>) -> crate::Result<()> {
-        let size = socket.send(send_buf)?;
-        if size != send_buf.len() {
-            return Err(crate::Error::new("failed to send complete request packet"));
+    if pending_responses > 0 {
+        receive_responses(&socket, &mut output_writer, pending_responses, pretty)?;
+    }
+
+    output_writer.flush()?;
+    Ok(())
+}
+
+fn connect_to_server_udp(server_addr: SocketAddr) -> crate::Result<UdpSocket> {
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    socket.connect(server_addr)?;
+    Ok(socket)
+}
+
+fn flush_send_buf(socket: &UdpSocket, send_buf: &mut Vec<u8>) -> crate::Result<()> {
+    let size = socket.send(send_buf)?;
+    if size != send_buf.len() {
+        return Err(crate::Error::new("failed to send complete request packet"));
+    }
+    send_buf.clear();
+    Ok(())
+}
+
+fn receive_responses(
+    socket: &UdpSocket,
+    output_writer: &mut impl Write,
+    expected: usize,
+    pretty: bool,
+) -> crate::Result<()> {
+    let mut recv_buf = vec![0u8; MAX_UDP_PACKET];
+    let mut received = 0usize;
+    while received < expected {
+        let bytes_read = match socket.recv(&mut recv_buf) {
+            Ok(size) => size,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                return Err(crate::Error::new(format!(
+                    "timed out waiting for responses (received {received} of {expected})"
+                )));
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        if bytes_read == 0 {
+            continue;
         }
-        send_buf.clear();
-        Ok(())
-    }
 
-    fn receive_responses(
-        &self,
-        socket: &UdpSocket,
-        output_writer: &mut impl Write,
-        expected: usize,
-    ) -> crate::Result<()> {
-        let mut recv_buf = vec![0u8; MAX_UDP_PACKET];
-        let mut received = 0usize;
-        while received < expected {
-            let bytes_read = match socket.recv(&mut recv_buf) {
-                Ok(size) => size,
-                Err(e)
-                    if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                    return Err(crate::Error::new(format!(
-                        "timed out waiting for responses (received {received} of {expected})"
-                    )));
-                }
-                Err(e) => return Err(e.into()),
-            };
-
-            if bytes_read == 0 {
+        let text = std::str::from_utf8(&recv_buf[..bytes_read])?;
+        for line in text.lines() {
+            if line.is_empty() {
                 continue;
             }
-
-            let text = std::str::from_utf8(&recv_buf[..bytes_read])?;
-            for line in text.lines() {
-                if line.is_empty() {
-                    continue;
-                }
-                let response = Response::parse(line.to_owned())?;
-                self.write_response(output_writer, &response)?;
-                received += 1;
-            }
+            let response = Response::parse(line.to_owned())?;
+            write_response(output_writer, &response, pretty)?;
+            received += 1;
         }
-        Ok(())
     }
+    Ok(())
+}
 
-    fn write_response(
-        &self,
-        output_writer: &mut impl Write,
-        response: &Response,
-    ) -> crate::Result<()> {
-        if self.pretty {
-            let pretty_json = nojson::json(|f| {
-                f.set_indent_size(2);
-                f.set_spacing(true);
-                f.value(response.json.value())
-            });
-            writeln!(output_writer, "{}", pretty_json)?;
-        } else {
-            writeln!(output_writer, "{}", response.json)?;
-        }
-        Ok(())
+fn write_response(
+    output_writer: &mut impl Write,
+    response: &Response,
+    pretty: bool,
+) -> crate::Result<()> {
+    if pretty {
+        let pretty_json = nojson::json(|f| {
+            f.set_indent_size(2);
+            f.set_spacing(true);
+            f.value(response.json.value())
+        });
+        writeln!(output_writer, "{}", pretty_json)?;
+    } else {
+        writeln!(output_writer, "{}", response.json)?;
     }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
