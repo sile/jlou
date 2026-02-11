@@ -128,25 +128,18 @@ fn receive_responses(socket: &UdpSocket, expected: usize, pretty: bool) -> crate
             Err(e) => return Err(e.into()),
         };
 
-        if bytes_read == 0 {
-            continue;
-        }
-
         let text = std::str::from_utf8(&recv_buf[..bytes_read])?;
         for line in text.lines() {
-            if line.is_empty() {
-                continue;
-            }
             if pretty {
-                let json = nojson::RawJsonOwned::parse(line.to_string())?;
+                let json = nojson::RawJson::parse(line)?;
                 let pretty_json = nojson::json(|f| {
                     f.set_indent_size(2);
                     f.set_spacing(true);
                     f.value(json.value())
                 });
-                println!("{}", pretty_json);
+                println!("{pretty_json}");
             } else {
-                println!("{}", line);
+                println!("{line}");
             }
             received += 1;
         }
