@@ -62,9 +62,9 @@ fn run(
 
     for line in input_reader.lines() {
         let line = line?;
-        let request = Request::parse(line)?;
-        let request_text = request.json.text();
-        let request_len = request_text.as_bytes().len();
+        let json = nojson::RawJson::parse(&line)?;
+        let has_id = crate::utils::validate_json_rpc_request(json.value())?.is_some();
+        let request_len = line.as_bytes().len();
 
         if request_len > send_buf_size {
             return Err(crate::Error::new("request size exceeds send-buf-size"));
@@ -78,9 +78,9 @@ fn run(
         if !send_buf.is_empty() {
             send_buf.push(b'\n');
         }
-        send_buf.extend_from_slice(request_text.as_bytes());
+        send_buf.extend_from_slice(line.as_bytes());
 
-        if request.id_index.is_some() {
+        if has_id {
             pending_responses += 1;
         }
     }
@@ -145,17 +145,4 @@ fn receive_responses(socket: &UdpSocket, expected: usize, pretty: bool) -> crate
         }
     }
     Ok(())
-}
-
-struct Request {
-    json: nojson::RawJsonOwned,
-    id_index: Option<usize>,
-}
-
-impl Request {
-    fn parse(json_text: String) -> Result<Self, nojson::JsonParseError> {
-        let json = nojson::RawJsonOwned::parse(json_text)?;
-        let id_index = crate::utils::validate_json_rpc_request(json.value())?.map(|v| v.index());
-        Ok(Self { json, id_index })
-    }
 }
