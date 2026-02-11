@@ -80,7 +80,7 @@ fn run(
         }
         send_buf.extend_from_slice(request_text.as_bytes());
 
-        if request.id.is_some() {
+        if request.id_index.is_some() {
             pending_responses += 1;
         }
     }
@@ -154,32 +154,15 @@ fn receive_responses(socket: &UdpSocket, expected: usize, pretty: bool) -> crate
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-enum RequestId {
-    Number(i64),
-    String(String),
-}
-
 struct Request {
     json: nojson::RawJsonOwned,
-    id: Option<RequestId>,
+    id_index: Option<usize>,
 }
 
 impl Request {
     fn parse(json_text: String) -> Result<Self, nojson::JsonParseError> {
         let json = nojson::RawJsonOwned::parse(json_text)?;
-        let id = Self::validate_request_and_parse_id(json.value())?;
-        Ok(Self { json, id })
-    }
-
-    fn validate_request_and_parse_id(
-        value: nojson::RawJsonValue<'_, '_>,
-    ) -> Result<Option<RequestId>, nojson::JsonParseError> {
-        let id_value = crate::utils::validate_json_rpc_request(value)?;
-        Ok(id_value.map(|v| match v.kind() {
-            nojson::JsonValueKind::Integer => RequestId::Number(v.try_into().unwrap()),
-            nojson::JsonValueKind::String => RequestId::String(v.try_into().unwrap()),
-            _ => unreachable!(),
-        }))
+        let id_index = crate::utils::validate_json_rpc_request(json.value())?.map(|v| v.index());
+        Ok(Self { json, id_index })
     }
 }
