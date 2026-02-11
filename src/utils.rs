@@ -5,3 +5,8 @@ pub fn parse_socket_addr(s: &str) -> Result<std::net::SocketAddr, std::net::Addr
         s.parse()
     }
 }
+
+pub fn parse_duration_ms(s: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
+    let ms: u64 = s.parse()?;
+    Ok(std::time::Duration::from_millis(ms))
+}

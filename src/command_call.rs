@@ -1,5 +1,5 @@
 use std::io::{BufRead, Write};
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
 
 const MAX_UDP_PACKET: usize = 65507;
@@ -8,35 +8,36 @@ const DEFAULT_TIMEOUT_MS_STR: &str = "5000";
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("call")
-        .doc("Read JSON-RPC requests from standard input and execute the RPC calls (UDP only)")
+        .doc("Read JSON-RPC requests from standard input and execute the RPC calls")
         .take(args)
         .is_present()
     {
         return Ok(false);
     }
 
-    let server_addr: String = noargs::arg("<SERVER>")
+    let server_addr: SocketAddr = noargs::arg("<SERVER>")
         .doc("JSON-RPC server address or hostname")
         .example("127.0.0.1:8080")
         .take(args)
-        .then(|a| -> Result<_, String> { Ok(normalize_server_addr(a.value())) })?;
+        .then(|a| crate::utils::parse_socket_addr(a.value()))?;
     let pretty: bool = noargs::flag("pretty")
         .short('p')
         .doc("Pretty-print JSON responses to stdout")
         .take(args)
         .is_present();
     let send_buf_size: usize = noargs::opt("send-buf-size")
+        .short('b')
         .ty("BYTES")
         .doc("Max UDP payload per outgoing packet; requests are joined with '\\n' up to this size")
         .default(DEFAULT_SEND_BUF_SIZE_STR)
         .take(args)
         .then(|o| o.value().parse())?;
-    let timeout_ms: u64 = noargs::opt("timeout")
+    let timeout: Duration = noargs::opt("timeout")
         .ty("MILLISECONDS")
         .doc("Read timeout for waiting responses (ms)")
         .default(DEFAULT_TIMEOUT_MS_STR)
         .take(args)
-        .then(|o| o.value().parse())?;
+        .then(|o| crate::utils::parse_duration_ms(o.value()))?;
 
     if args.metadata().help_mode {
         return Ok(true);
@@ -46,7 +47,7 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         server_addr,
         pretty,
         send_buf_size,
-        timeout: Duration::from_millis(timeout_ms),
+        timeout,
     };
     call_command.run()?;
 
@@ -54,7 +55,7 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
 }
 
 struct CallCommand {
-    server_addr: String,
+    server_addr: SocketAddr,
     pretty: bool,
     send_buf_size: usize,
     timeout: Duration,
@@ -92,9 +93,7 @@ impl CallCommand {
             let request_len = request_text.as_bytes().len();
 
             if request_len > self.send_buf_size {
-                return Err(crate::Error::new(
-                    "request size exceeds send-buf-size",
-                ));
+                return Err(crate::Error::new("request size exceeds send-buf-size"));
             }
 
             let extra = if send_buf.is_empty() { 0 } else { 1 };
@@ -126,16 +125,14 @@ impl CallCommand {
 
     fn connect_to_server_udp(&self) -> crate::Result<UdpSocket> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
-        socket.connect(&self.server_addr)?;
+        socket.connect(self.server_addr)?;
         Ok(socket)
     }
 
     fn flush_send_buf(&self, socket: &UdpSocket, send_buf: &mut Vec<u8>) -> crate::Result<()> {
         let size = socket.send(send_buf)?;
         if size != send_buf.len() {
-            return Err(crate::Error::new(
-                "failed to send complete request packet",
-            ));
+            return Err(crate::Error::new("failed to send complete request packet"));
         }
         send_buf.clear();
         Ok(())
@@ -196,14 +193,6 @@ impl CallCommand {
             writeln!(output_writer, "{}", response.json)?;
         }
         Ok(())
-    }
-}
-
-fn normalize_server_addr(s: &str) -> String {
-    if s.starts_with(':') {
-        format!("127.0.0.1{s}")
-    } else {
-        s.to_owned()
     }
 }
 
