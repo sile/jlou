@@ -1,5 +1,4 @@
 const MAX_UDP_PACKET: usize = 65507;
-const DEFAULT_SEND_BUF_SIZE_STR: &str = "65507";
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("echo-server")
@@ -24,7 +23,7 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         .short('b')
         .ty("BYTES")
         .doc("Max UDP payload per response packet; responses are joined with '\\n' up to this size")
-        .default(DEFAULT_SEND_BUF_SIZE_STR)
+        .default("1200")
         .take(args)
         .then(|o| o.value().parse())?;
 

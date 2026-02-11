@@ -6,7 +6,7 @@ pub fn parse_socket_addr(s: &str) -> Result<std::net::SocketAddr, std::net::Addr
     }
 }
 
-pub fn parse_duration_ms(s: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
-    let ms: u64 = s.parse()?;
-    Ok(std::time::Duration::from_millis(ms))
+pub fn parse_duration_secs(s: &str) -> Result<std::time::Duration, std::num::ParseFloatError> {
+    let secs = s.parse()?;
+    Ok(std::time::Duration::from_secs_f32(secs))
 }

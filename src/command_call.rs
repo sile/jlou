@@ -3,8 +3,6 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
 
 const MAX_UDP_PACKET: usize = 65507;
-const DEFAULT_SEND_BUF_SIZE_STR: &str = "1200";
-const DEFAULT_TIMEOUT_MS_STR: &str = "5000";
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("call")
@@ -29,15 +27,15 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         .short('b')
         .ty("BYTES")
         .doc("Max UDP payload per outgoing packet; requests are joined with '\\n' up to this size")
-        .default(DEFAULT_SEND_BUF_SIZE_STR)
+        .default("1200")
         .take(args)
         .then(|o| o.value().parse())?;
     let timeout: Duration = noargs::opt("timeout")
-        .ty("MILLISECONDS")
-        .doc("Read timeout for waiting responses (ms)")
-        .default(DEFAULT_TIMEOUT_MS_STR)
+        .ty("SECONDS")
+        .doc("Read timeout for waiting responses")
+        .default("5")
         .take(args)
-        .then(|o| crate::utils::parse_duration_ms(o.value()))?;
+        .then(|o| crate::utils::parse_duration_secs(o.value()))?;
 
     if args.metadata().help_mode {
         return Ok(true);
