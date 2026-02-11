@@ -38,7 +38,7 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
         ));
     }
 
-    run_server_udp(bind_addr, send_buf_size.get())?;
+    run(bind_addr, send_buf_size.get())?;
     Ok(true)
 }
 
@@ -60,7 +60,7 @@ where
     let _ = socket.send_to(response.to_string().as_bytes(), addr); // Ignores the result for simplicity
 }
 
-fn run_server_udp(bind_addr: std::net::SocketAddr, send_buf_size: usize) -> crate::Result<()> {
+fn run(bind_addr: std::net::SocketAddr, send_buf_size: usize) -> crate::Result<()> {
     let socket = std::net::UdpSocket::bind(bind_addr)?;
     let mut recv_buf = vec![0u8; MAX_UDP_PACKET];
     let mut send_buf = vec![0u8; send_buf_size];
