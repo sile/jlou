@@ -1,4 +1,4 @@
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
 
@@ -56,8 +56,6 @@ fn run(
 
     let stdin = std::io::stdin();
     let input_reader = std::io::BufReader::new(stdin.lock());
-    let stdout = std::io::stdout();
-    let mut output_writer = std::io::BufWriter::new(stdout.lock());
 
     let mut send_buf: Vec<u8> = Vec::with_capacity(send_buf_size);
     let mut pending_responses = 0usize;
@@ -92,10 +90,9 @@ fn run(
     }
 
     if pending_responses > 0 {
-        receive_responses(&socket, &mut output_writer, pending_responses, pretty)?;
+        receive_responses(&socket, pending_responses, pretty)?;
     }
 
-    output_writer.flush()?;
     Ok(())
 }
 
@@ -114,12 +111,7 @@ fn flush_send_buf(socket: &UdpSocket, send_buf: &mut Vec<u8>) -> crate::Result<(
     Ok(())
 }
 
-fn receive_responses(
-    socket: &UdpSocket,
-    output_writer: &mut impl Write,
-    expected: usize,
-    pretty: bool,
-) -> crate::Result<()> {
+fn receive_responses(socket: &UdpSocket, expected: usize, pretty: bool) -> crate::Result<()> {
     let mut recv_buf = vec![0u8; MAX_UDP_PACKET];
     let mut received = 0usize;
     while received < expected {
@@ -145,28 +137,19 @@ fn receive_responses(
             if line.is_empty() {
                 continue;
             }
-            let response = Response::parse(line.to_owned())?;
-            write_response(output_writer, &response, pretty)?;
+            if pretty {
+                let json = nojson::RawJsonOwned::parse(line.to_string())?;
+                let pretty_json = nojson::json(|f| {
+                    f.set_indent_size(2);
+                    f.set_spacing(true);
+                    f.value(json.value())
+                });
+                println!("{}", pretty_json);
+            } else {
+                println!("{}", line);
+            }
             received += 1;
         }
-    }
-    Ok(())
-}
-
-fn write_response(
-    output_writer: &mut impl Write,
-    response: &Response,
-    pretty: bool,
-) -> crate::Result<()> {
-    if pretty {
-        let pretty_json = nojson::json(|f| {
-            f.set_indent_size(2);
-            f.set_spacing(true);
-            f.value(response.json.value())
-        });
-        writeln!(output_writer, "{}", pretty_json)?;
-    } else {
-        writeln!(output_writer, "{}", response.json)?;
     }
     Ok(())
 }
@@ -243,66 +226,6 @@ impl Request {
         }
         if !has_method {
             return Err(value.invalid("method field is required"));
-        }
-
-        Ok(id)
-    }
-}
-
-struct Response {
-    json: nojson::RawJsonOwned,
-    _id: Option<RequestId>,
-}
-
-impl Response {
-    fn parse(json_text: String) -> Result<Self, nojson::JsonParseError> {
-        let json = nojson::RawJsonOwned::parse(json_text)?;
-        let id = Self::validate_response_and_parse_id(json.value())?;
-        Ok(Self { json, _id: id })
-    }
-
-    fn validate_response_and_parse_id(
-        value: nojson::RawJsonValue<'_, '_>,
-    ) -> Result<Option<RequestId>, nojson::JsonParseError> {
-        if value.kind() == nojson::JsonValueKind::Array {
-            return Err(value.invalid("batch responses are not supported"));
-        }
-
-        let mut has_jsonrpc = false;
-        let mut id = None;
-        let mut has_result_or_error = false;
-
-        for (name, value) in value.to_object()? {
-            match name.as_string_str()? {
-                "jsonrpc" => {
-                    if value.as_string_str()? != "2.0" {
-                        return Err(value.invalid("jsonrpc version must be '2.0'"));
-                    }
-                    has_jsonrpc = true;
-                }
-                "id" => {
-                    id = match value.kind() {
-                        nojson::JsonValueKind::Integer => {
-                            Some(RequestId::Number(value.try_into()?))
-                        }
-                        nojson::JsonValueKind::String => Some(RequestId::String(value.try_into()?)),
-                        _ => return Err(value.invalid("id must be an integer or string")),
-                    };
-                }
-                "result" | "error" => {
-                    has_result_or_error = true;
-                }
-                _ => {
-                    // Ignore unknown members
-                }
-            }
-        }
-
-        if !has_jsonrpc {
-            return Err(value.invalid("jsonrpc field is required"));
-        }
-        if !has_result_or_error {
-            return Err(value.invalid("result or error field is required"));
         }
 
         Ok(id)
