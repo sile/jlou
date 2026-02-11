@@ -84,7 +84,7 @@ fn run(bind_addr: std::net::SocketAddr, send_buf_size: usize) -> crate::Result<(
                 continue;
             };
 
-            let Ok(Some(id)) = parse_request(json.value())
+            let Ok(Some(id)) = crate::utils::validate_json_rpc_request(json.value())
                 .inspect_err(|e| reply_err(&socket, peer_addr, -32600, e))
             else {
                 continue;
@@ -132,61 +132,4 @@ fn run(bind_addr: std::net::SocketAddr, send_buf_size: usize) -> crate::Result<(
             }
         }
     }
-}
-
-fn parse_request<'text, 'raw>(
-    value: nojson::RawJsonValue<'text, 'raw>,
-) -> Result<Option<nojson::RawJsonValue<'text, 'raw>>, nojson::JsonParseError> {
-    if value.kind() == nojson::JsonValueKind::Array {
-        return Err(value.invalid("batch requests are not supported"));
-    }
-
-    let mut has_jsonrpc = false;
-    let mut has_method = false;
-    let mut id = None;
-    for (name, value) in value.to_object()? {
-        match name.as_string_str()? {
-            "jsonrpc" => {
-                if value.as_string_str()? != "2.0" {
-                    return Err(value.invalid("jsonrpc version must be '2.0'"));
-                }
-                has_jsonrpc = true;
-            }
-            "id" => {
-                if !matches!(
-                    value.kind(),
-                    nojson::JsonValueKind::Integer | nojson::JsonValueKind::String
-                ) {
-                    return Err(value.invalid("id must be an integer or string"));
-                }
-                id = Some(value);
-            }
-            "method" => {
-                if value.kind() != nojson::JsonValueKind::String {
-                    return Err(value.invalid("method must be a string"));
-                }
-                has_method = true;
-            }
-            "params" => {
-                if !matches!(
-                    value.kind(),
-                    nojson::JsonValueKind::Object | nojson::JsonValueKind::Array
-                ) {
-                    return Err(value.invalid("params must be an object or array"));
-                }
-            }
-            _ => {
-                // Ignore unknown members
-            }
-        }
-    }
-
-    if !has_jsonrpc {
-        return Err(value.invalid("jsonrpc field is required"));
-    }
-    if !has_method {
-        return Err(value.invalid("method field is required"));
-    }
-
-    Ok(id)
 }

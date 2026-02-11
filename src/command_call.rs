@@ -175,59 +175,11 @@ impl Request {
     fn validate_request_and_parse_id(
         value: nojson::RawJsonValue<'_, '_>,
     ) -> Result<Option<RequestId>, nojson::JsonParseError> {
-        if value.kind() == nojson::JsonValueKind::Array {
-            return Err(value.invalid("batch requests are not supported"));
-        }
-
-        let mut has_jsonrpc = false;
-        let mut has_method = false;
-        let mut id = None;
-        for (name, value) in value.to_object()? {
-            match name.as_string_str()? {
-                "jsonrpc" => {
-                    if value.as_string_str()? != "2.0" {
-                        return Err(value.invalid("jsonrpc version must be '2.0'"));
-                    }
-                    has_jsonrpc = true;
-                }
-                "id" => {
-                    id = match value.kind() {
-                        nojson::JsonValueKind::Integer => {
-                            Some(RequestId::Number(value.try_into()?))
-                        }
-                        nojson::JsonValueKind::String => Some(RequestId::String(value.try_into()?)),
-                        _ => {
-                            return Err(value.invalid("id must be an integer or string"));
-                        }
-                    };
-                }
-                "method" => {
-                    if value.kind() != nojson::JsonValueKind::String {
-                        return Err(value.invalid("method must be a string"));
-                    }
-                    has_method = true;
-                }
-                "params" => {
-                    if !matches!(
-                        value.kind(),
-                        nojson::JsonValueKind::Object | nojson::JsonValueKind::Array
-                    ) {
-                        return Err(value.invalid("params must be an object or array"));
-                    }
-                }
-                _ => {
-                    // Ignore unknown members
-                }
-            }
-        }
-
-        if !has_jsonrpc {
-            return Err(value.invalid("jsonrpc field is required"));
-        }
-        if !has_method {
-            return Err(value.invalid("method field is required"));
-        }
-
-        Ok(id)
+        let id_value = crate::utils::validate_json_rpc_request(value)?;
+        Ok(id_value.map(|v| match v.kind() {
+            nojson::JsonValueKind::Integer => RequestId::Number(v.try_into().unwrap()),
+            nojson::JsonValueKind::String => RequestId::String(v.try_into().unwrap()),
+            _ => unreachable!(),
+        }))
     }
 }
