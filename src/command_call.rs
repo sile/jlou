@@ -64,7 +64,7 @@ fn run(
         let line = line?;
         let json = nojson::RawJson::parse(&line)?;
         let has_id = crate::utils::validate_json_rpc_request(json.value())?.is_some();
-        let request_len = line.as_bytes().len();
+        let request_len = line.len();
 
         if request_len > send_buf_size {
             return Err(crate::Error::new("request size exceeds send-buf-size"));
