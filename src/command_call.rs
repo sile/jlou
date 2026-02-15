@@ -97,9 +97,31 @@ fn run(
 }
 
 fn connect_to_server_udp(server_addr: SocketAddr) -> crate::Result<UdpSocket> {
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    let bind_addr = client_bind_addr_for_server(server_addr);
+    let socket = UdpSocket::bind(bind_addr)?;
     socket.connect(server_addr)?;
     Ok(socket)
+}
+
+fn client_bind_addr_for_server(server_addr: SocketAddr) -> SocketAddr {
+    match server_addr {
+        SocketAddr::V4(addr) => {
+            let ip = if addr.ip().is_loopback() {
+                std::net::Ipv4Addr::LOCALHOST
+            } else {
+                std::net::Ipv4Addr::UNSPECIFIED
+            };
+            SocketAddr::from((ip, 0))
+        }
+        SocketAddr::V6(addr) => {
+            let ip = if addr.ip().is_loopback() {
+                std::net::Ipv6Addr::LOCALHOST
+            } else {
+                std::net::Ipv6Addr::UNSPECIFIED
+            };
+            SocketAddr::from((ip, 0))
+        }
+    }
 }
 
 fn flush_send_buf(socket: &UdpSocket, send_buf: &mut Vec<u8>) -> crate::Result<()> {
